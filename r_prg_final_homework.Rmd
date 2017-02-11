@@ -1,0 +1,84 @@
+---
+title: "R語言程式設計期末作業：參加Kaggle競賽"
+author: "陳韋哲"
+date: "2017/2/12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##輸入用於建立分類模型的資料
+```{r}
+url = "https://storage.googleapis.com/2017_ithome_ironman/data/kaggle_titanic_train.csv"
+titanic <- read.csv(url)
+summary(titanic)
+```
+**可以發現Embarked一項有遺漏為空白，使用最多的“S”來填補**
+```{r}
+titanic$Embarked <- as.character(titanic$Embarked)
+titanic$Embarked[titanic$Embarked==""] <- "S"
+titanic$Embarked <- factor(titanic$Embarked)
+titanic$Survived <- factor(titanic$Survived)
+```
+**挑選欄位，移除分析不需要的"PassengerId", "Name", "Ticket", "Cabin"欄位，留下"Survived", "Pclass", "Sex", "Age", "SibSp","Parch","Fare", "Embarked"欄位**
+```{r}
+titanic_selected_col <- titanic[,c("Survived", "Pclass", "Sex", "Age", "SibSp","Parch","Fare", "Embarked")]
+```
+
+##用k-Nearest Neighbours法填補遺漏值
+**DMwR的knnImputation函數[參考](https://rpubs.com/skydome20/R-Note10-Missing_Value)**
+```{r message=FALSE}
+library(DMwR)
+imputed_titanic <- knnImputation(titanic_selected_col)
+summary(imputed_titanic$Age)
+```
+##將完成遺漏值填補的資料以70%-30%比例抽樣分成訓練樣本與測試樣本
+```{r}
+n <- nrow(imputed_titanic)
+set.seed(1945)
+shuffled_imputed_titanic<- imputed_titanic[sample(n),]
+train_proportion<- round(n * 0.7)
+train_set <-shuffled_imputed_titanic[1:train_proportion, ]
+test_set <- shuffled_imputed_titanic[(train_proportion+1):n, ]
+```
+##把訓練樣本用隨機森林法建立分類模型
+```{r message=FALSE}
+library(randomForest)
+set.seed(87)
+forest_fit <- randomForest(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = train_set, ntree = 100)
+```
+##使用測試樣本計算模型accuracy
+```{r}
+prediction <- predict(forest_fit, newdata = test_set)
+confusion_matrix <- table(test_set$Survived, prediction)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+accuracy
+```
+
+##輸入用於預測的資料
+```{r}
+url <- "https://storage.googleapis.com/py_ds_basic/kaggle_titanic_test.csv"
+to_predict <- read.csv(url)
+summary(to_predict)
+```
+**發現該資料中Age與Fare皆有遺漏值，同樣使用k-Nearest Neighbours法來填補**
+```{r}
+to_predict_selected_col <- to_predict[,c("Pclass", "Sex", "Age", "SibSp","Parch","Fare", "Embarked")]
+imputed_to_predict <- knnImputation(to_predict_selected_col)
+summary(imputed_to_predict)
+```
+
+##使用之前建立好的分類模型預測乘客的生還情形，並輸出為csv檔案
+```{r}
+predicted_results<- predict(forest_fit, newdata =imputed_to_predict)
+to_submit<- data.frame(to_predict$PassengerId, predicted_results)
+names(to_submit) <- c("PassengerId", "Survived")
+head(to_submit)
+write.csv(to_submit, file = "to_submit.csv", row.names = FALSE)
+```
+
+![](/Users/apple/R Programming/Kaggle_Titanic.png)
+
+##結論：使用隨機森林模型得到的分數是0.74163（而使用決策樹分類模型得到的分數是0.73206。）
